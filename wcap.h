@@ -15,7 +15,7 @@
 #include <stdatomic.h>
 
 #define WCAP_TITLE L"屏幕录制"
-#define WCAP_URL   L"https://github.com/mmozeiko/wcap"
+#define WCAP_URL   L"https://github.com/yunhui2026/wcap"
 
 #if defined(WCAP_GIT_INFO)
 #	define WCAP_CONFIG_TITLE "屏幕录制 - 设置, " __DATE__ " [" WCAP_GIT_INFO "]"
