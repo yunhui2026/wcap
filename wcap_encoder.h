@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "wcap.h"
 #include "wcap_config.h"
@@ -8,6 +8,11 @@
 #include <d3d11_4.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <shellapi.h>
+
+// ShowNotification 定义在 wcap.c（与本头文件同属一个编译单元），
+// 此处前置声明，以便硬件编码器不可用、自动降级为软件编码时提示用户
+static void ShowNotification(LPCWSTR Message, LPCWSTR Title, DWORD Flags);
 
 //
 // interface
@@ -372,6 +377,10 @@ BOOL Encoder_Start(Encoder* Encoder, ID3D11Device* Device, LPWSTR FileName, cons
 		Assert(0);
 	}
 
+	// 硬件编码器可能不存在（老显卡 / 驱动未注册 MFT / 双显卡下当前设备无编码器），
+	// 此时自动降级为软件编码，而不是直接报错中断录制
+	BOOL UseHardware = Config->Config->HardwareEncoder;
+
 	// make sure MFT video encoder exists, some vendors wrongly allow SinkWriter to be created for invalid configuration
 	{
 		bool Ok = false;
@@ -384,7 +393,7 @@ BOOL Encoder_Start(Encoder* Encoder, ID3D11Device* Device, LPWSTR FileName, cons
 
 		UINT32 Flags = MFT_ENUM_FLAG_SORTANDFILTER;
 
-		if (Config->Config->HardwareEncoder)
+		if (UseHardware)
 		{
 			IDXGIDevice* DxgiDevice;
 			HR(ID3D11Device_QueryInterface(Device, &IID_IDXGIDevice, (void**)&DxgiDevice));
@@ -423,9 +432,44 @@ BOOL Encoder_Start(Encoder* Encoder, ID3D11Device* Device, LPWSTR FileName, cons
 		}
 		IMFAttributes_Release(EnumAttributes);
 
+		// 硬件编码器不存在 → 自动降级为软件编码重试（软件编码器由系统自带，覆盖面最广）
+		if (!Ok && UseHardware)
+		{
+			UseHardware = FALSE;
+
+			MFT_REGISTER_TYPE_INFO SoftInputType = { MFMediaType_Video, *VideoInputFormat };
+			MFT_REGISTER_TYPE_INFO SoftOutputType = { MFMediaType_Video, *Codec };
+
+			IMFAttributes* SoftAttributes;
+			if (SUCCEEDED(MFCreateAttributes(&SoftAttributes, 1)))
+			{
+				UINT32 SoftCount = 0;
+				IMFActivate** SoftActivate = NULL;
+				if (SUCCEEDED(MFTEnum2(MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_SORTANDFILTER | MFT_ENUM_FLAG_SYNCMFT,
+					&SoftInputType, &SoftOutputType, SoftAttributes, &SoftActivate, &SoftCount)) && SoftCount != 0)
+				{
+					Ok = true;
+				}
+				if (SoftActivate)
+				{
+					for (size_t SoftIndex = 0; SoftIndex != SoftCount; SoftIndex++)
+					{
+						IMFActivate_Release(SoftActivate[SoftIndex]);
+					}
+					CoTaskMemFree(SoftActivate);
+				}
+				IMFAttributes_Release(SoftAttributes);
+			}
+
+			if (Ok)
+			{
+				ShowNotification(L"当前显卡没有可用的硬件编码器，已自动切换为软件编码（CPU 占用会略高）。", NULL, NIIF_INFO);
+			}
+		}
+
 		if (!Ok)
 		{
-			MessageBoxW(NULL, L"Cannot find video encoder!", WCAP_TITLE, MB_ICONERROR);
+			MessageBoxW(NULL, L"Cannot find video encoder!\n\n系统里没有找到可用的视频编码器。常见原因：\n1) 系统是 Windows N/KN 版本，缺少媒体功能包（Media Feature Pack）\n2) 若要使用 HEVC，需要先安装 HEVC 视频扩展", WCAP_TITLE, MB_ICONERROR);
 			goto bail;
 		}
 	}
@@ -439,7 +483,7 @@ BOOL Encoder_Start(Encoder* Encoder, ID3D11Device* Device, LPWSTR FileName, cons
 	{
 		IMFAttributes* Attributes;
 		HR(MFCreateAttributes(&Attributes, 4));
-		if (Config->Config->HardwareEncoder)
+		if (UseHardware)
 		{
 			HR(IMFAttributes_SetUINT32(Attributes, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
 
