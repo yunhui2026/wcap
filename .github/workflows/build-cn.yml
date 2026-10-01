@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -29,9 +32,16 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: wcap-x64.exe
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest wcap-x64.exe \
+            --title "屏幕录制（自动构建）" \
+            --notes "由 GitHub Actions 从本仓库源码自动编译，每次推送都会更新。
+
+- 文件：wcap-x64.exe（单文件，约 67 KB，无需安装，双击即用）
+- 系统要求：Windows 10 1903 或更高版本
+- 构建来源：本仓库 main 分支 \`${GITHUB_SHA:0:7}\`" \
+            --latest
