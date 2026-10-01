@@ -56,6 +56,20 @@ build.cmd x64
 
 源码中的中文界面依赖以下三点，改动时请一并保持：UTF-8 编码、带 BOM、编译时加 `/utf-8`。
 
+## 联系我
+
+- QQ：**3314967083**
+
+使用中遇到问题、有功能建议，或者需要定制开发，都可以直接加我。
+
+## 赞赏支持
+
+如果这个工具帮到了你，欢迎扫码打赏，金额随意，感谢支持。
+
+<img src="assets/donate.png" width="220" alt="赞赏码">
+
+---
+
 ## 许可证
 
 Unlicense —— 本项目及其上游 [mmozeiko/wcap](https://github.com/mmozeiko/wcap) 均释放至公有领域。
