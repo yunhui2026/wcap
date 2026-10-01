@@ -1,6 +1,6 @@
 # 屏幕录制
 
-一个极简的 Windows 屏幕录制工具。**单文件 exe，约 67 KB，无需安装，双击即用。**
+一个极简的 Windows 屏幕录制工具。**单文件 exe，约 175 KB，无需安装，双击即用。**
 
 基于 [mmozeiko/wcap](https://github.com/mmozeiko/wcap) 二次开发，界面与提示已完整汉化，并增加了可视化主窗口。
 

@@ -39,5 +39,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SIZE_KB=$(( $(wc -c < wcap-x64.exe) / 1024 ))
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest wcap-x64.exe --title "屏幕录制（自动构建）" --notes "由 GitHub Actions 从本仓库源码自动编译，每次推送都会更新。单文件约 67KB，无需安装。构建来源 commit ${GITHUB_SHA:0:7}" --latest
+          gh release create latest wcap-x64.exe --title "屏幕录制（自动构建）" --notes "由 GitHub Actions 从本仓库源码自动编译，每次推送都会更新。单文件约 ${SIZE_KB} KB，无需安装。构建来源 commit ${GITHUB_SHA:0:7}" --latest
