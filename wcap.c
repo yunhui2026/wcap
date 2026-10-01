@@ -47,6 +47,12 @@ __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 #define WM_WCAP_TRAY_TITLE      (WM_USER+3)
 #define WM_WCAP_COMMAND         (WM_USER+4)
 
+// capture must be started from the main message loop, not from inside a
+// synchronously dispatched WM_COMMAND - D3D11/WGC setup fails in that context
+#define WM_WCAP_START_MONITOR   (WM_USER+10)
+#define WM_WCAP_START_WINDOW    (WM_USER+11)
+#define WM_WCAP_START_REGION    (WM_USER+12)
+
 #define WCAP_AUDIO_CAPTURE_TIMER    1
 #define WCAP_AUDIO_CAPTURE_INTERVAL 100 // msec
 
@@ -787,20 +793,20 @@ static LRESULT CALLBACK MainWindowProc(HWND Window, UINT Message, WPARAM WParam,
 		case ID_MAIN_RECORD:
 			if (gRecording)
 			{
-				StopRecording();
+				PostMessageW(gWindow, WM_WCAP_STOP_CAPTURE, 0, 0);
 			}
 			else
 			{
-				MainWindowStart(CaptureMonitor);
+				PostMessageW(gWindow, WM_WCAP_START_MONITOR, 0, 0);
 			}
 			return 0;
 
 		case ID_MAIN_WINDOW:
-			MainWindowStart(CaptureWindow);
+			PostMessageW(gWindow, WM_WCAP_START_WINDOW, 0, 0);
 			return 0;
 
 		case ID_MAIN_REGION:
-			MainWindowStart(CaptureRegionInit);
+			PostMessageW(gWindow, WM_WCAP_START_REGION, 0, 0);
 			return 0;
 
 		case ID_MAIN_SETTINGS:
@@ -854,10 +860,12 @@ static void CreateMainWindow(void)
 
 	gMainWindow = CreateWindowExW(
 		0, MAIN_WINDOW_CLASS, WCAP_TITLE,
-		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
 		CW_USEDEFAULT, CW_USEDEFAULT, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT,
 		NULL, NULL, Instance, NULL);
 	Assert(gMainWindow);
+	ShowWindow(gMainWindow, SW_SHOW);
+	UpdateWindow(gMainWindow);
 
 	gMainFont = CreateFontW(-15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, WCAP_UI_FONT);
@@ -1242,15 +1250,15 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 			}
 			else if (Command == CMD_START_MONITOR)
 			{
-				MainWindowStart(CaptureMonitor);
+				PostMessageW(gWindow, WM_WCAP_START_MONITOR, 0, 0);
 			}
 			else if (Command == CMD_START_WINDOW)
 			{
-				MainWindowStart(CaptureWindow);
+				PostMessageW(gWindow, WM_WCAP_START_WINDOW, 0, 0);
 			}
 			else if (Command == CMD_START_REGION)
 			{
-				MainWindowStart(CaptureRegionInit);
+				PostMessageW(gWindow, WM_WCAP_START_REGION, 0, 0);
 			}
 			else if (Command == CMD_STOP_RECORDING)
 			{
@@ -1356,6 +1364,21 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 		{
 			StopRecording();
 		}
+		return 0;
+	}
+	else if (Message == WM_WCAP_START_MONITOR)
+	{
+		MainWindowStart(CaptureMonitor);
+		return 0;
+	}
+	else if (Message == WM_WCAP_START_WINDOW)
+	{
+		MainWindowStart(CaptureWindow);
+		return 0;
+	}
+	else if (Message == WM_WCAP_START_REGION)
+	{
+		MainWindowStart(CaptureRegionInit);
 		return 0;
 	}
 	else if (Message == WM_WCAP_ALREADY_RUNNING)
