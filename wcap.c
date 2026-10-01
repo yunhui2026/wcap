@@ -67,6 +67,10 @@ __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 #define CMD_START_MONITOR  5
 #define CMD_START_WINDOW   6
 #define CMD_START_REGION   7
+#define CMD_DONATE         10
+
+// 赞赏码以 RCDATA 资源嵌入 exe，定义见 wcap.rc
+#define IDR_DONATE         3
 #define CMD_STOP_RECORDING 8
 #define CMD_OPEN_FOLDER    9
 
@@ -784,6 +788,43 @@ static void MainWindowShow(void)
 	SetForegroundWindow(gMainWindow);
 }
 
+// 赞赏码嵌在 exe 里，点击时释放到临时目录交给系统默认看图程序打开，
+// 这样离线也能看，不依赖网络访问 GitHub。
+static void ShowDonateImage(void)
+{
+	HRSRC Resource = FindResourceW(NULL, MAKEINTRESOURCEW(IDR_DONATE), RT_RCDATA);
+	HGLOBAL Loaded = Resource ? LoadResource(NULL, Resource) : NULL;
+	DWORD Size = Resource ? SizeofResource(NULL, Resource) : 0;
+	void* Data = Loaded ? LockResource(Loaded) : NULL;
+
+	WCHAR Path[MAX_PATH];
+	if (Data == NULL || Size == 0 || GetTempPathW(_countof(Path), Path) == 0)
+	{
+		ShellExecuteW(NULL, L"open", WCAP_URL, NULL, NULL, SW_SHOWNORMAL);
+		return;
+	}
+	PathAppendW(Path, L"wcap_donate.png");
+
+	HANDLE File = CreateFileW(Path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (File == INVALID_HANDLE_VALUE)
+	{
+		ShellExecuteW(NULL, L"open", WCAP_URL, NULL, NULL, SW_SHOWNORMAL);
+		return;
+	}
+
+	DWORD Written = 0;
+	WriteFile(File, Data, Size, &Written, NULL);
+	CloseHandle(File);
+
+	if (Written != Size)
+	{
+		ShellExecuteW(NULL, L"open", WCAP_URL, NULL, NULL, SW_SHOWNORMAL);
+		return;
+	}
+
+	ShellExecuteW(NULL, L"open", Path, NULL, NULL, SW_SHOWNORMAL);
+}
+
 static LRESULT CALLBACK MainWindowProc(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 {
 	if (Message == WM_COMMAND)
@@ -1237,6 +1278,7 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 			AppendMenuW(Menu, MF_STRING, CMD_OPEN_FOLDER, L"打开输出文件夹");
 			AppendMenuW(Menu, MF_SEPARATOR, 0, NULL);
 			AppendMenuW(Menu, MF_STRING, CMD_WCAP, L"项目主页");
+			AppendMenuW(Menu, MF_STRING, CMD_DONATE, L"赞赏作者");
 			AppendMenuW(Menu, MF_STRING, CMD_QUIT, L"退出");
 
 			POINT Mouse;
@@ -1267,6 +1309,10 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 			else if (Command == CMD_WCAP)
 			{
 				ShellExecuteW(NULL, L"open", WCAP_URL, NULL, NULL, SW_SHOWNORMAL);
+			}
+			else if (Command == CMD_DONATE)
+			{
+				ShowDonateImage();
 			}
 			else if (Command == CMD_QUIT)
 			{
