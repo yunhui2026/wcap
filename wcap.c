@@ -388,6 +388,63 @@ static void StopRecording(void)
 	UpdateMainWindowControls();
 }
 
+// 当前配置对应的视频编码格式（与 wcap_encoder.h 中 Encoder_Start 的取值保持一致）
+static void GetVideoEncoderFormats(const GUID** Codec, const GUID** InputFormat)
+{
+	if (gConfig.VideoCodec == CONFIG_VIDEO_H264)
+	{
+		*InputFormat = &MFVideoFormat_NV12;
+		*Codec = &MFVideoFormat_H264;
+	}
+	else if (gConfig.VideoCodec == CONFIG_VIDEO_H265)
+	{
+		*InputFormat = (gConfig.VideoProfile == CONFIG_VIDEO_MAIN_10) ? &MFVideoFormat_P010 : &MFVideoFormat_NV12;
+		*Codec = &MFVideoFormat_HEVC;
+	}
+	else
+	{
+		*InputFormat = (gConfig.VideoProfile == CONFIG_VIDEO_MAIN_10) ? &MFVideoFormat_P010 : &MFVideoFormat_NV12;
+		*Codec = &MFVideoFormat_AV1;
+	}
+}
+
+// 指定显卡是否提供所需格式的硬件编码器（只查 MFT 注册信息，不需要创建设备）
+static BOOL AdapterHasVideoEncoder(LUID* AdapterLuid, const GUID* Codec, const GUID* InputFormat)
+{
+	IMFAttributes* Attributes = NULL;
+	if (FAILED(MFCreateAttributes(&Attributes, 1)))
+	{
+		return FALSE;
+	}
+
+	MFT_REGISTER_TYPE_INFO InputType  = { MFMediaType_Video, *InputFormat };
+	MFT_REGISTER_TYPE_INFO OutputType = { MFMediaType_Video, *Codec };
+
+	BOOL Found = FALSE;
+	UINT32 ActivateCount = 0;
+	IMFActivate** Activate = NULL;
+
+	if (SUCCEEDED(IMFAttributes_SetBlob(Attributes, &MFT_ENUM_ADAPTER_LUID, (UINT8*)AdapterLuid, sizeof(*AdapterLuid))) &&
+		SUCCEEDED(MFTEnum2(MFT_CATEGORY_VIDEO_ENCODER,
+			MFT_ENUM_FLAG_SORTANDFILTER | MFT_ENUM_FLAG_ASYNCMFT | MFT_ENUM_FLAG_HARDWARE,
+			&InputType, &OutputType, Attributes, &Activate, &ActivateCount)) && ActivateCount != 0)
+	{
+		Found = TRUE;
+	}
+
+	if (Activate)
+	{
+		for (UINT32 Index = 0; Index != ActivateCount; Index++)
+		{
+			IMFActivate_Release(Activate[Index]);
+		}
+		CoTaskMemFree(Activate);
+	}
+	IMFAttributes_Release(Attributes);
+
+	return Found;
+}
+
 static ID3D11Device* CreateDevice(void)
 {
 	IDXGIAdapter* Adapter = NULL;
@@ -400,12 +457,58 @@ static ID3D11Device* CreateDevice(void)
 			IDXGIFactory6* Factory6;
 			if (SUCCEEDED(IDXGIFactory_QueryInterface(Factory, &IID_IDXGIFactory6, (void**)&Factory6)))
 			{
-				DXGI_GPU_PREFERENCE Preference = gConfig.HardwarePreferIntegrated ? DXGI_GPU_PREFERENCE_MINIMUM_POWER : DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE;
-				if (FAILED(IDXGIFactory6_EnumAdapterByGpuPreference(Factory6, 0, Preference, &IID_IDXGIAdapter, &Adapter)))
+				// 用户偏好的显卡在前，另一块作为备选
+				DXGI_GPU_PREFERENCE First  = gConfig.HardwarePreferIntegrated ? DXGI_GPU_PREFERENCE_MINIMUM_POWER : DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE;
+				DXGI_GPU_PREFERENCE Second = gConfig.HardwarePreferIntegrated ? DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE : DXGI_GPU_PREFERENCE_MINIMUM_POWER;
+
+				const GUID* Codec;
+				const GUID* InputFormat;
+				GetVideoEncoderFormats(&Codec, &InputFormat);
+
+				IDXGIAdapter* Preferred = NULL;
+				if (FAILED(IDXGIFactory6_EnumAdapterByGpuPreference(Factory6, 0, First, &IID_IDXGIAdapter, &Preferred)))
 				{
 					// just to be safe
-					Adapter = NULL;
+					Preferred = NULL;
 				}
+
+				if (Preferred != NULL)
+				{
+					DXGI_ADAPTER_DESC PreferredDesc;
+					IDXGIAdapter_GetDesc(Preferred, &PreferredDesc);
+
+					if (AdapterHasVideoEncoder(&PreferredDesc.AdapterLuid, Codec, InputFormat))
+					{
+						Adapter = Preferred;
+					}
+					else
+					{
+						// 偏好的显卡没有该格式的硬件编码器（典型场景：双显卡笔记本上独显无编码器、
+						// 集显有 Intel Quick Sync），自动改用另一块显卡，避免录制直接报错中断
+						IDXGIAdapter* Alternative = NULL;
+						if (FAILED(IDXGIFactory6_EnumAdapterByGpuPreference(Factory6, 0, Second, &IID_IDXGIAdapter, &Alternative)))
+						{
+							Alternative = NULL;
+						}
+
+						DXGI_ADAPTER_DESC AlternativeDesc;
+						if (Alternative != NULL && SUCCEEDED(IDXGIAdapter_GetDesc(Alternative, &AlternativeDesc)) &&
+							AdapterHasVideoEncoder(&AlternativeDesc.AdapterLuid, Codec, InputFormat))
+						{
+							Adapter = Alternative;
+							IDXGIAdapter_Release(Preferred);
+						}
+						else
+						{
+							if (Alternative != NULL)
+							{
+								IDXGIAdapter_Release(Alternative);
+							}
+							Adapter = Preferred;
+						}
+					}
+				}
+
 				IDXGIFactory6_Release(Factory6);
 			}
 			IDXGIFactory_Release(Factory);
